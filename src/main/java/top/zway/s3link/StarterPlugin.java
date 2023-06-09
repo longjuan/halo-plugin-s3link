@@ -1,4 +1,4 @@
-package run.halo.starter;
+package top.zway.s3link;
 
 import org.pf4j.PluginWrapper;
 import org.springframework.stereotype.Component;
@@ -21,11 +21,11 @@ public class StarterPlugin extends BasePlugin {
 
     @Override
     public void start() {
-        System.out.println("插件启动成功！");
+
     }
 
     @Override
     public void stop() {
-        System.out.println("插件停止！");
+
     }
 }

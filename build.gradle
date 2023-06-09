@@ -5,7 +5,7 @@ plugins {
     id "run.halo.plugin.devtools" version "0.0.4"
 }
 
-group 'run.halo.starter'
+group 'top.zway.s3link'
 sourceCompatibility = JavaVersion.VERSION_17
 
 repositories {
@@ -21,6 +21,9 @@ dependencies {
 
     testImplementation 'run.halo.app:api'
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
+
+    implementation platform('software.amazon.awssdk:bom:2.19.8')
+    implementation 'software.amazon.awssdk:s3'
 }
 
 test {
