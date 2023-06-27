@@ -33,6 +33,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -51,7 +53,6 @@ public class S3LinkServiceImpl implements S3LinkService {
             policy.getSpec().getTemplateName()), null);
     }
 
-    @SuppressWarnings({"checkstyle:OperatorWrap", "checkstyle:WhitespaceAfter"})
     @Override
     public Mono<S3ListResult> listObjects(String policyName, String continuationToken,
         Integer pageSize) {
@@ -94,10 +95,66 @@ public class S3LinkServiceImpl implements S3LinkService {
                             .then()
                             .thenReturn(new S3ListResult(new ArrayList<>(objectVos.values()),
                                 listObjectsV2Response.continuationToken(),
+                                null, null,
                                 listObjectsV2Response.nextContinuationToken(),
                                 listObjectsV2Response.isTruncated()));
                     });
             });
+    }
+
+    @Override
+    public Mono<S3ListResult> listObjectsUnlinked(String policyName, String continuationToken,
+        String continuationObject, Integer pageSize) {
+        // TODO 优化成查一次数据库
+        return Mono.defer(() -> {
+            List<S3ListResult.ObjectVo> s3Objects = new ArrayList<>();
+            AtomicBoolean continuationObjectMatched = new AtomicBoolean(false);
+            AtomicReference<String> currToken = new AtomicReference<>(continuationToken);
+
+            return Flux.defer(() -> Flux.just(
+                    new TokenState(null, currToken.get() == null ? "" : currToken.get())))
+                .flatMap(tokenState -> listObjects(policyName, tokenState.nextToken, pageSize))
+                .flatMap(s3ListResult -> {
+                    var filteredObjects = s3ListResult.getObjects();
+                    if (!continuationObjectMatched.get()) {
+                        // 判断s3ListResult.getObjects()里是否有continuationObject
+                        var continuationObjectVo = s3ListResult.getObjects().stream()
+                            .filter(objectVo -> objectVo.getKey().equals(continuationObject))
+                            .findFirst();
+                        if (continuationObjectVo.isPresent()) {
+                            s3Objects.clear();
+                            // 删除continuationObject及之前的所有对象
+                            filteredObjects = s3ListResult.getObjects().stream()
+                                .dropWhile(objectVo -> !objectVo.getKey()
+                                    .equals(continuationObject))
+                                .skip(1)
+                                .toList();
+                            continuationObjectMatched.set(true);
+                        }
+                    }
+                    filteredObjects = filteredObjects.stream()
+                        .filter(objectVo -> !objectVo.getIsLinked())
+                        .toList();
+                    s3Objects.addAll(filteredObjects);
+                    currToken.set(s3ListResult.getNextToken());
+                    return Mono.just(new TokenState(s3ListResult.getCurrentToken(),
+                        s3ListResult.getNextToken()));
+                })
+                .repeat()
+                .takeUntil(
+                    tokenState -> tokenState.nextToken() == null || s3Objects.size() >= pageSize)
+                .last()
+                .map(tokenState -> {
+                    var limitedObjects = s3Objects.stream().limit(pageSize).toList();
+                    return new S3ListResult(limitedObjects, continuationToken, continuationObject,
+                        limitedObjects.size() > 0 ? limitedObjects.get(limitedObjects.size() - 1)
+                            .getKey() : null, tokenState.currToken,
+                        limitedObjects.size() == pageSize);
+                });
+        });
+    }
+
+    record TokenState(String currToken, String nextToken) {
     }
 
 

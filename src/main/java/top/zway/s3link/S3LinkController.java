@@ -1,7 +1,6 @@
 package top.zway.s3link;
 
 import lombok.RequiredArgsConstructor;
-import org.springframework.boot.web.server.WebServerException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -27,9 +26,16 @@ public class S3LinkController {
     @GetMapping("/objects/{policyName}")
     public Mono<S3ListResult> listObjects(@PathVariable String policyName,
         @RequestParam(name = "continuationToken", required = false) String continuationToken,
-        @RequestParam(name = "pageSize") Integer pageSize) {
-        return s3LinkService.listObjects(policyName, continuationToken, pageSize)
-            .onErrorMap(throwable -> new WebServerException("Failed to list objects", throwable));
+        @RequestParam(name = "continuationObject", required = false) String continuationObject,
+        @RequestParam(name = "pageSize") Integer pageSize,
+        @RequestParam(name = "unlinked", required = false, defaultValue = "false")
+        Boolean unlinked) {
+        if (unlinked) {
+            return s3LinkService.listObjectsUnlinked(policyName, continuationToken,
+                continuationObject, pageSize);
+        } else {
+            return s3LinkService.listObjects(policyName, continuationToken, pageSize);
+        }
     }
 
     @PostMapping("/attachments/link")

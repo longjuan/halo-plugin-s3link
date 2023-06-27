@@ -12,4 +12,7 @@ public interface S3LinkService {
         Integer pageSize);
 
     Mono<LinkResult.LinkResultItem> addAttachmentRecord(String policyName, String objectKey);
+
+    Mono<S3ListResult> listObjectsUnlinked(String policyName, String continuationToken,
+        String continuationObject, Integer pageSize);
 }

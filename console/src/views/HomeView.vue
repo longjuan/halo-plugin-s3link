@@ -1,25 +1,31 @@
 <script setup lang="ts">
 import {
+  IconArrowDown,
+  IconRefreshLine,
+  Toast,
   VButton,
   VCard,
-  VPageHeader,
-  VSpace,
-  VTag,
+  VDropdown,
+  VDropdownItem,
+  VEmpty,
   VEntity,
   VEntityField,
   VLoading,
-  IconRefreshLine,
-  VEmpty,
   VModal,
+  VPageHeader,
+  VSpace,
+  VTag,
 } from "@halo-dev/components";
 import CarbonFolderDetailsReference from "~icons/carbon/folder-details-reference";
 import {computed, onMounted, ref, watch} from "vue";
+import FilterTag from "@/components/filter/FilterTag.vue";
+import FilterCleanButton from "@/components/filter/FilterCleanButton.vue";
 import {
-  getApisApiPluginHaloRunV1Alpha1PluginsS3LinkPoliciesS3,
   getApisApiPluginHaloRunV1Alpha1PluginsS3LinkObjectsByPolicyName,
+  getApisApiPluginHaloRunV1Alpha1PluginsS3LinkPoliciesS3,
   postApisApiPluginHaloRunV1Alpha1PluginsS3LinkAttachmentsLink,
 } from "@/controller";
-import type {ObjectVo} from "@/interface";
+import type {ObjectVo, S3ListResult} from "@/interface";
 import AttachmentFileTypeIcon from "@/components/AttachmentFileTypeIcon.vue";
 
 const selectedFiles = ref<string[]>([]);
@@ -31,16 +37,25 @@ const policyOptions = ref<{ label: string; value: string; attrs: any }[]>([{
   value: "",
   attrs: {disabled: true}
 }]);
-const files = ref<ObjectVo[]>([]);
+const s3Objects = ref<S3ListResult>({
+  objects: [],
+  hasMore: false,
+  currentToken: "",
+  nextToken: "",
+  currentContinuationObject: "",
+  nextContinuationObject: "",
+});
 const isFetching = ref(false);
 const checkedAll = ref(false);
 const isShowModal = ref(false);
-const currentToken = ref("");
-const nextToken = ref("");
-const hasMore = ref(false);
 const linkTips = ref("");
 const isLinking = ref(false);
 const isFetchingPolicies = ref(true);
+const linkedStatusItems: { label: string; value?: boolean }[] = [
+  {label: "全部", value: false},
+  {label: "未关联", value: true},
+];
+const selectedLinkedStatusItem = ref<{ label: string; value?: boolean }>(linkedStatusItems[0]);
 
 const emptyTips = computed(() => {
   if (isFetchingPolicies.value) {
@@ -63,11 +78,12 @@ const handleCheckAllChange = (e: Event) => {
 
   if (checked) {
     selectedFiles.value =
-      files.value?.filter(file => !file.isLinked).map((file) => {
+      s3Objects.value.objects?.filter(file => !file.isLinked).map((file) => {
         return file.key || "";
       }) || [];
   } else {
     selectedFiles.value.length = 0;
+    checkedAll.value = false;
   }
 };
 
@@ -75,7 +91,7 @@ const handleCheckAllChange = (e: Event) => {
 const fetchPolicies = async () => {
   try {
     const policiesData = await getApisApiPluginHaloRunV1Alpha1PluginsS3LinkPoliciesS3();
-    if (policiesData.status == 200){
+    if (policiesData.status == 200) {
       policyOptions.value = [{
         label: "请选择策略",
         value: "",
@@ -101,38 +117,57 @@ onMounted(() => {
 });
 
 watch(selectedFiles, (newValue) => {
-  checkedAll.value = files.value?.filter(file => !file.isLinked)
+  checkedAll.value = s3Objects.value.objects?.filter(file => !file.isLinked)
       .filter(file => !newValue.includes(file.key || "")).length == 0
-    && files.value?.length != 0;
+    && s3Objects.value.objects?.length != 0;
 });
+
+const changeNextTokenAndObject = () => {
+  s3Objects.value.currentToken = s3Objects.value.nextToken;
+  s3Objects.value.currentContinuationObject = s3Objects.value.nextContinuationObject;
+  s3Objects.value.nextToken = "";
+  s3Objects.value.nextContinuationObject = "";
+};
+
+const clearTokenAndObject = () => {
+  s3Objects.value.currentToken = "";
+  s3Objects.value.currentContinuationObject = "";
+  s3Objects.value.nextToken = "";
+  s3Objects.value.nextContinuationObject = "";
+};
 
 const fetchObjects = async () => {
   if (!policyName.value) {
     return;
   }
   isFetching.value = true;
-  files.value.length = 0;
+  s3Objects.value.objects = [];
   try {
     const objectsData = await getApisApiPluginHaloRunV1Alpha1PluginsS3LinkObjectsByPolicyName({
       policyName: policyName.value,
       pageSize: size.value,
-      continuationToken: currentToken.value
+      continuationToken: s3Objects.value.currentToken,
+      continuationObject: s3Objects.value.currentContinuationObject,
+      unlinked: selectedLinkedStatusItem.value?.value,
     });
     if (objectsData.status == 200) {
-      files.value = objectsData.data.objects;
-      hasMore.value = objectsData.data.hasMore;
-      currentToken.value = objectsData.data.currentToken;
-      nextToken.value = objectsData.data.nextToken;
+      s3Objects.value = objectsData.data;
 
-      if (files.value.length == 0 && hasMore.value && nextToken.value) {
-        currentToken.value = nextToken.value;
+      if (s3Objects.value.objects?.length == 0 && s3Objects.value.hasMore && s3Objects.value.nextToken) {
+        changeNextTokenAndObject();
         await fetchObjects();
+      } else if (s3Objects.value.objects?.length == 0 && !s3Objects.value.hasMore && page.value > 1) {
+        page.value = 1;
+        clearTokenAndObject();
+        await fetchObjects();
+        Toast.warning("最后一页为空，已返回第一页");
       }
     }
   } catch (error) {
     console.error(error);
   }
   selectedFiles.value.length = 0;
+  checkedAll.value = false;
   isFetching.value = false;
 };
 
@@ -170,11 +205,10 @@ const handleNextPage = () => {
   if (!policyName.value) {
     return;
   }
-  if (hasMore.value) {
+  if (s3Objects.value.hasMore) {
     isFetching.value = true;
     page.value += 1;
-    currentToken.value = nextToken.value;
-    nextToken.value = "";
+    changeNextTokenAndObject();
     fetchObjects();
   }
 };
@@ -185,14 +219,18 @@ const handleFirstPage = () => {
   }
   isFetching.value = true;
   page.value = 1;
-  currentToken.value = "";
-  nextToken.value = "";
+  clearTokenAndObject();
   fetchObjects();
 };
 
 const handleModalClose = () => {
   isShowModal.value = false;
   fetchObjects();
+};
+
+const handleLinkedStatusItemChange = (item: { label: string; value?: boolean }) => {
+  selectedLinkedStatusItem.value = item;
+  handleFirstPage();
 };
 
 </script>
@@ -222,7 +260,6 @@ const handleModalClose = () => {
               />
             </div>
             <div class="flex w-full flex-1 items-center sm:w-auto">
-              <!-- 没选中就显示复选框 -->
               <div
                 v-if="!selectedFiles.length"
                 class="flex items-center gap-2"
@@ -238,18 +275,54 @@ const handleModalClose = () => {
                   @change="fetchObjects()"
                 ></FormKit>
 
+                <FilterTag
+                  v-if="selectedLinkedStatusItem.value != linkedStatusItems[0].value"
+                  @close="handleLinkedStatusItemChange(linkedStatusItems[0])"
+                >
+                  {{
+                    $t("core.common.filters.results.status", {
+                      status: selectedLinkedStatusItem.label,
+                    })
+                  }}
+                </FilterTag>
+
+                <FilterCleanButton
+                  v-if="selectedLinkedStatusItem.value != linkedStatusItems[0].value"
+                  @click="handleLinkedStatusItemChange(linkedStatusItems[0])"
+                />
               </div>
-              <!-- 选中就显示操作按钮 -->
               <VSpace v-else>
                 <VButton type="primary" @click="handleLink">
                   关联
                 </VButton>
               </VSpace>
             </div>
-            <!-- 右边刷新按钮 -->
+
             <div class="mt-4 flex sm:mt-0">
-              <!-- TODO: 仅查看未关联 -->
               <VSpace spacing="lg">
+                <VDropdown>
+                  <div
+                    class="flex cursor-pointer select-none items-center text-sm text-gray-700 hover:text-black"
+                  >
+                    <span class="mr-0.5">
+                      {{ $t("core.common.filters.labels.status") }}
+                    </span>
+                    <span>
+                      <IconArrowDown/>
+                    </span>
+                  </div>
+                  <template #popper>
+                    <VDropdownItem
+                      v-for="(statusItem, index) in linkedStatusItems"
+                      :key="index"
+                      :selected="selectedLinkedStatusItem?.value === statusItem.value"
+                      @click="handleLinkedStatusItemChange(statusItem)"
+                    >
+                      {{ statusItem.label }}
+                    </VDropdownItem>
+                  </template>
+                </VDropdown>
+
                 <div class="flex flex-row gap-2">
                   <div
                     class="group cursor-pointer rounded p-1 hover:bg-gray-200"
@@ -272,7 +345,7 @@ const handleModalClose = () => {
 
       <VLoading v-if="isFetching"/>
 
-      <Transition v-else-if="!files?.length" appear name="fade">
+      <Transition v-else-if="!s3Objects.objects?.length" appear name="fade">
         <VEmpty
           message="空空如也"
           :title="emptyTips"
@@ -285,7 +358,7 @@ const handleModalClose = () => {
           class="box-border h-full w-full divide-y divide-gray-100"
           role="list"
         >
-          <li v-for="(file, index) in files" :key="index">
+          <li v-for="(file, index) in s3Objects.objects" :key="index">
             <VEntity :is-selected="checkSelection(file)">
               <template
                 #checkbox
@@ -350,7 +423,7 @@ const handleModalClose = () => {
 
               <span class="text-sm text-gray-500">第 {{ page }} 页</span>
 
-              <VButton size="small" @click="handleNextPage" :disabled="!hasMore || isFetching || !policyName">
+              <VButton size="small" @click="handleNextPage" :disabled="!s3Objects.hasMore || isFetching || !policyName">
                 下一页
               </VButton>
             </div>
@@ -395,7 +468,7 @@ const handleModalClose = () => {
       </VSpace>
     </template>
     <div class="flex flex-col">
-      {{linkTips}}
+      {{ linkTips }}
     </div>
   </VModal>
 </template>

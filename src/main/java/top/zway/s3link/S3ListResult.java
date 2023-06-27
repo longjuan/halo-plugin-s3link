@@ -11,6 +11,8 @@ import java.util.List;
 public class S3ListResult{
     private List<ObjectVo> objects;
     private String currentToken;
+    private String currentContinuationObject;
+    private String nextContinuationObject;
     private String nextToken;
     private Boolean hasMore;
 
