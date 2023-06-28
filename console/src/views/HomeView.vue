@@ -417,7 +417,7 @@ const handleLinkedStatusItemChange = (item: { label: string; value?: boolean }) 
       <template #footer>
         <div class="bg-white sm:flex sm:items-center sm:justify-end">
           <div class="inline-flex items-center gap-5">
-            <span class="text-xs text-gray-500">已自动过滤文件夹对象，页面实际显示数量少为正常现象</span>
+            <span class="text-xs text-gray-500 hidden md:flex">已自动过滤文件夹对象，页面实际显示数量少为正常现象</span>
             <div class="inline-flex items-center gap-2">
               <VButton size="small" @click="handleFirstPage" :disabled="!policyName">返回第一页</VButton>
 
